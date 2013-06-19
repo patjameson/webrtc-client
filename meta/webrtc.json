@@ -1,0 +1,8 @@
+{
+    "webrtc": {
+        "requires": [
+            "node",
+            "socket_io"
+        ]
+    }
+}

@@ -1,0 +1,11 @@
+{
+    "name": "webrtc",
+    "builds": {
+        "webrtc": {
+            "jsfiles": [
+                "js/webrtc.js"
+            ]
+        },
+        "build-dir": "../webrtc-server/pubilc/javascripts"
+    }
+}
