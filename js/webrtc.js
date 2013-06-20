@@ -1,16 +1,13 @@
 var socket = io.connect('/');
-var cur_stream = null;
-var sessions, pc1, client_id, id, dc1
-	, raw_id = window.location.pathname.match(/\/(\d+)/)
-	, is_creator = raw_id === null || raw_id.length == 0;
+var sessions, pc1, id, dc1;
 
 var DEFAULT_STUN_SERVER = {'url': 'stun:stun.l.google.com:19302'};
 
 var _localStreamElement = null,
 	_remoteStreamElement = null,
 	_roomId = '',
-	_clientId = -1,
-	_streaming = false,
+	clientId = -1,
+	_isStreaming = false,
 	_localStream = null,
 	_remoteStream = null,
 	_isDataChannelOpen = false,
@@ -20,93 +17,45 @@ var _localStreamElement = null,
 function WebRTC() {}
 
 WebRTC.prototype = {
-	startMediaStream: function(callback) {
+	startStream: function (type, callback) {
+		var configuration = {'iceServers': [DEFAULT_STUN_SERVER]};
+		var connection = {'optional': [{'RtpDataChannels': true }]};
+		pc1 = new RTCPeerConnection(configuration, connection);
 
-		getUserMedia({audio: true, video: true}, function(stream) {
-			_localStream = stream;
+		thisWebRTC = this;
 
-			attachMediaStream(_localStreamElement, _localStream);
+		if (type == 'both' || type == 'media' || typeof type === undefined) {
+			thisWebRTC._startLocalStream(function() {
+				pc1.addStream(_localStream);
 
-			var configuration = {'iceServers': [DEFAULT_STUN_SERVER]};
-			var connection = {'optional': [{'RtpDataChannels': true }]};
-			pc1 = new RTCPeerConnection(configuration, connection);
-			pc1.addStream(_localStream);
+				pc1.onaddstream = function (event) {
+					_remoteStream = event.stream;
+					attachMediaStream(_remoteStreamElement, _remoteStream);
+					_isStreaming = true;
+				};
+
+				if (type == 'both' || typeof type === undefined) {
+					dc1 = pc1.createDataChannel('test', {'reliable': false});
+
+					thisWebRTC._startDataChannel();
+				}
+
+				thisWebRTC._makeConnection(callback);
+			});
+		} else if (type == 'data') {
 			dc1 = pc1.createDataChannel('test', {'reliable': false});
+			
+			thisWebRTC._startDataChannel();
 
-			pc1.onaddstream = function(event) {
-				_remoteStream = event.stream;
-				attachMediaStream(_remoteStreamElement, _remoteStream);
-			};
-
-			pc1.onicecandidate = function(event) {
-				if (event.candidate) {
-					socket.emit('cand', {'client_id': client_id, 'cand': event.candidate, 'id': id});
-				}
-			};
-
-			console.log('outside');
-			console.log(socket);
-			socket.emit('join', {'id': _roomId});
-
-			socket.on('joined', function(data) {
-				console.log('recieved');
-				client_id = data.client_id;
-				id = data.id;
-
-				if (_roomId === '') {
-					console.log('before offer');
-					pc1.createOffer(function(desc) {
-						console.log('after offer');
-						pc1.setLocalDescription(desc);
-						socket.emit('desc', {'client_id': client_id, 'desc': desc, 'id': id});
-					}, null);
-				}
-
-				console.log('before callback');
-				callback(id);
-				console.log('after callback');
-			});
-
-			socket.on('add_desc', function(data) {
-				client_id = data.client_id;
-				id = data.id;
-
-				console.log('setting remote description');
-				console.log(data.desc);
-				pc1.setRemoteDescription(new RTCSessionDescription(data.desc));
-
-				_streaming = true;
-
-				if (_roomId !== '') {
-					pc1.createAnswer(function(desc) {
-						pc1.setLocalDescription(desc);
-						socket.emit('desc', {'client_id': client_id, 'desc': desc, 'id': id});
-					});
-				}
-			});
-
-			socket.on('add_cand', function(data) {
-				pc1.addIceCandidate(new RTCIceCandidate(data.cand));
-			});
-		});
+			thisWebRTC._makeConnection(callback);
+		}
 	},
 
-	startDataChannel: function(callback) {
+	setDataChannelCallback: function(callback) {
 		dc1.onmessage = callback;
-
-		console.log('setting up stuff');
-
-		dc1.onopen = function() {
-			console.log('open!');
-			_isDataChannelOpen = true;
-			for (var i = 0;i < _disconnectedMessages.length;i++) {
-				dc1.send(_disconnectedMessages[i]);
-			}
-		};
 	},
 
 	send: function(message) {
-		console.log('trying to send');
 		if (_isDataChannelOpen)
 			dc1.send(message);
 		else
@@ -123,15 +72,18 @@ WebRTC.prototype = {
 
 	pause: function() {
 		pc1.removeStream(_localStream);
-		pc1.createOffer(function(desc) {
-			pc1.setLocalDescription(desc);
-			socket.emit('desc', {'client_id': client_id, 'desc': desc, 'id': id});
-		}, null);
+		this._updateDescription();
+		_isStreaming = false;
+	},
+
+	isStreaming: function() {
+		return paused;
 	},
 
 	resume: function() {
-		//pc1.addStream(_localStream);
-		//pc1.createOffer(...);
+		pc1.addStream(_localStream);
+		this._updateDescription();
+		_isStreaming = true;
 	},
 
 	mute: function() {
@@ -157,6 +109,76 @@ WebRTC.prototype = {
 
 	isStreaming: function() {
 		return _streaming;
+	},
+
+	_startLocalStream: function (callback) {
+		getUserMedia({audio: true, video: true}, function (stream) {
+			_localStream = stream;
+
+			attachMediaStream(_localStreamElement, _localStream);
+
+			callback();
+		});
+	},
+
+	_startDataChannel: function () {
+		dc1.onmessage = null;
+
+		dc1.onopen = function () {
+			_isDataChannelOpen = true;
+			for (var i = 0;i < _disconnectedMessages.length;i++) {
+				dc1.send(_disconnectedMessages[i]);
+			}
+		};
+	},
+
+	_makeConnection: function (callback) {
+		var thisWebRTC = this;
+		pc1.onicecandidate = function (event) {
+			if (event.candidate) {
+				socket.emit('cand', {'client_id': client_id, 'cand': event.candidate, 'id': id});
+			}
+		};
+
+		socket.emit('join', {'id': _roomId});
+
+		socket.on('joined', function (data) {
+			client_id = data.client_id;
+			id = data.id;
+
+			if (_roomId === '') {
+				thisWebRTC._updateDescription();
+			}
+
+			callback(id);
+		});
+
+		socket.on('add_desc', function (data) {
+			client_id = data.client_id;
+			id = data.id;
+
+			pc1.setRemoteDescription(new RTCSessionDescription(data.desc));
+
+			_streaming = true;
+
+			if (_roomId !== '') {
+				pc1.createAnswer(function (desc) {
+					pc1.setLocalDescription(desc);
+					socket.emit('desc', {'client_id': client_id, 'desc': desc, 'id': id});
+				});
+			}
+		});
+
+		socket.on('add_cand', function (data) {
+			pc1.addIceCandidate(new RTCIceCandidate(data.cand));
+		});
+	},
+
+	_updateDescription: function() {
+		pc1.createOffer(function(desc) {
+			pc1.setLocalDescription(desc);
+			socket.emit('desc', {'client_id': client_id, 'desc': desc, 'id': id});
+		}, null);
 	}
 };
 
