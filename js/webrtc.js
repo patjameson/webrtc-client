@@ -58,7 +58,7 @@ WebRTC.prototype = {
         var reader = new FileReader();
         reader.onload = function(e) {
             var filename = document.getElementById(id).value.split(/(\/|\\)/).pop();
-            thisWebRTC.send(filename + "," + e.target.result);
+            thisWebRTC.send(e.target.result);
         }
         reader.readAsText(document.getElementById(id).files[0]);
     },
@@ -151,6 +151,17 @@ WebRTC.prototype = {
         };
     },
 
+    _createConn: function(id2, id) {
+        var configuration = {'iceServers': [DEFAULT_STUN_SERVER]};
+        var connection = {'optional': [{'RtpDataChannels': true }]};
+        _pcs[id] = new RTCPeerConnection(configuration, connection);
+        this._startDataChannel(id);
+
+        _pcs[id].addStream(_localStream);
+
+        this._updateDescription(_pcs[id], id2, id);
+    },
+
     _makeConnection: function (callback, pc) {
         var thisWebRTC = this;
 
@@ -160,28 +171,8 @@ WebRTC.prototype = {
             client_id = data.client_id;
             id = data.id;
 
-            var i;
-            for (i = 0;i < client_id;i++) {
-                var configuration = {'iceServers': [DEFAULT_STUN_SERVER]};
-                var connection = {'optional': [{'RtpDataChannels': true }]};
-                _pcs[i] = new RTCPeerConnection(configuration, connection);
-                thisWebRTC._startDataChannel(i);
-
-                _pcs[i].onicecandidate = function (event) {
-                    if (event.candidate) {
-                        socket.emit('cand', {'client_id': i, 'from_client_id': client_id, 'cand': event.candidate, 'id': id});
-                    }
-                };
-
-                _pcs[i].onaddstream = function (event) {
-                    _remoteStreams[_remoteStreams.length] = event.stream;
-                    attachMediaStream(_remoteStreamElements[_remoteStreamElements.length-1], _remoteStreams[_remoteStreams.length-1]);
-                    _isStreaming = true;
-                };
-
-                _pcs[i].addStream(_localStream);
-
-                thisWebRTC._updateDescription(_pcs[i], i);
+            if (client_id != 0) {
+                thisWebRTC._createConn(client_id, 0);
             }
 
             callback(id);
@@ -189,22 +180,25 @@ WebRTC.prototype = {
 
         socket.on('add_desc', function (data) {
             client_id = data.from_client_id;
+            
             id = data.id;
 
             console.log(data.client_id + " <------ " + client_id);
 
             var owner = false;
             if (_pcs[client_id] === undefined) {
+                console.log('craeting one for, ' + client_id);
                 var configuration = {'iceServers': [DEFAULT_STUN_SERVER]};
                 var connection = {'optional': [{'RtpDataChannels': true }]};
                 _pcs[client_id] = new RTCPeerConnection(configuration, connection);
                 thisWebRTC._startDataChannel(client_id);
                 owner = true;
+
+                _pcs[client_id].addStream(_localStream);
             }
 
-            _pcs[client_id].addStream(_localStream);
-
             _pcs[client_id].onaddstream = function (event) {
+                console.log('2');
                 _remoteStreams[_remoteStreams.length] = event.stream;
                 attachMediaStream(_remoteStreamElements[_remoteStreamElements.length-1], _remoteStreams[_remoteStreams.length-1]);
                 _isStreaming = true;
@@ -216,8 +210,7 @@ WebRTC.prototype = {
                 }
             };
 
-            if (_pcs[client_id] !== undefined)
-                _pcs[client_id].setRemoteDescription(new RTCSessionDescription(data.desc));
+            _pcs[client_id].setRemoteDescription(new RTCSessionDescription(data.desc));
 
             _streaming = true;
 
@@ -237,6 +230,13 @@ WebRTC.prototype = {
             }
 
             _newConnectionCallback();
+            console.log(data.client_id + " " + (client_id+1));
+
+            if (!owner) {
+                if (data.client_id > client_id+1) {
+                    thisWebRTC._createConn(data.client_id, client_id+1);
+                }
+            }
         });
 
         socket.on('add_cand', function (data) {
@@ -249,11 +249,11 @@ WebRTC.prototype = {
         });
     },
 
-    _updateDescription: function (pc, _client_id) {
+    _updateDescription: function (pc, client_id2, _client_id) {
         pc.createOffer(function (desc) {
             pc.setLocalDescription(desc);
-            console.log(client_id + " ------> " + _client_id);
-            socket.emit('desc', {'client_id': _client_id, 'from_client_id': client_id, 'desc': desc, 'id': id});
+            console.log(client_id2 + " ------> " + _client_id);
+            socket.emit('desc', {'client_id': _client_id, 'from_client_id': client_id2, 'desc': desc, 'id': id});
         }, null);
     },
 
