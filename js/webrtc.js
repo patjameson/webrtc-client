@@ -170,6 +170,10 @@ WebRTC.prototype = {
         return _streaming;
     },
 
+    _getLocalStream: function () {
+        return _localStream;
+    },
+
     _startLocalStream: function (callback) {
         getUserMedia({audio: true, video: true}, function (stream) {
             _localStream = stream;
@@ -242,9 +246,8 @@ WebRTC.prototype = {
     _makeConnection: function (callback, pc) {
         var thisWebRTC = this;
 
-        socket.emit('join', {'id': _roomId});
-
         socket.on('joined', function (data) {
+            alert('joined');
             client_id = data.client_id;
             id = data.id;
 
@@ -256,6 +259,7 @@ WebRTC.prototype = {
         });
 
         socket.on('add_desc', function (data) {
+            alert('add_desc');
             client_id = data.from_client_id;
             
             id = data.id;
@@ -313,6 +317,7 @@ WebRTC.prototype = {
         });
 
         socket.on('add_cand', function (data) {
+            alert('add cand');
             if (_pcs[data.client_id] === undefined) {
                 if (cands[data.client_id] === undefined) cands[data.client_id] = [];
                 cands[data.client_id].push(data.cand);
@@ -320,6 +325,8 @@ WebRTC.prototype = {
                 _pcs[data.client_id].addIceCandidate(new RTCIceCandidate(data.cand));
             }
         });
+
+        socket.emit('join', {'id': _roomId});
     },
 
     _updateDescription: function (pc, client_id2, _client_id) {

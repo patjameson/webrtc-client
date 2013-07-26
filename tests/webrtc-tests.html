@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+	<head>
+	    <meta charset="utf-8">
+		<title>webrtc Tests</title>
+	</head>
+	<body lang="en" class="yui3-skin-sam">
+
+	    <div id="streams">
+	    	<video id="vid11"></video>
+	    	<video id="vid21"></video>
+	    </div>
+	    
+	    <script src="http://webrtc.googlecode.com/svn/trunk/samples/js/base/adapter.js"></script>
+		<script src="http://yui.yahooapis.com/3.11.0/build/yui/yui-min.js"></script>
+		<script src="./assets/webrtc-server.js"></script>
+		<script src="./build/webrtc/webrtc.js"></script>
+	    <script src="./assets/webrtc-tests.js"></script>
+	    
+		<script>
+			YUI({
+	            coverage: ['webrtc'],
+	            filter: (window.location.search.match(/[?&]filter=([^&]+)/) || [])[1] || 'raw'
+			}).use('test-console', 'webrtc-tests', function (Y) {
+				new Y.Test.Console().render();
+
+				Y.Test.Runner.run();
+			});
+		</script>
+	</body>
+</html>
