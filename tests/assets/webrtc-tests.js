@@ -24,45 +24,48 @@ YUI.add('webrtc-tests', function(Y) {
             });
 
             this.wait();
-        }, 
+        },
 
         "WebRTC should complete the handshake": function () {
             var webrtc1 = new Y.WebRTC();
+            var webrtc2 = new Y.WebRTC();
 
             webrtc1.setLocal('vid11');
 
             var thisTest = this;
 
-            var numStreams = 1;
+            var numStreams1 = 1;
 
-            webrtc1.onConnection(function() {
-                numStreams++;
-                Y.one('#streams').append('<video id="vid1' + numStreams + '" width="400px" autoplay></video>');
-                webrtc1.addRemote('vid1' + numStreams);
+            webrtc1.onConnection(function () {
+                thisTest.resume(function () {
+                    numStreams1++;
+                    Y.one('#streams').append('<video id="vid1' + numStreams1 + '" width="400px" autoplay></video>');
+                    webrtc1.addRemote('vid1' + numStreams1);
+
+                    //checking to make sure there are video tracks for each of the video elements,
+                    //indicating that the handshake was successful.
+                    Assert.isTrue(webrtc1._getLocalStream().getVideoTracks().length > 0 &&
+                        webrtc2._getLocalStream().getVideoTracks().length > 0 &&
+                        webrtc1._getRemoteStreams()[0].getVideoTracks().length > 0 &&
+                        webrtc2._getRemoteStreams()[0].getVideoTracks().length > 0);
+                });
             });
 
             webrtc1.startStream('both', function(id) {
-                thisTest.resume(function () {
-                    var webrtc2 = new Y.WebRTC();
-
                     webrtc2.setLocal('vid21');
 
                     webrtc2.setId(id);
 
+                    var numStreams2 = 1;
+
                     webrtc2.onConnection(function() {
-                        numStreams++;
-                        Y.one('#streams').append('<video id="vid2' + numStreams + '" width="400px" autoplay></video>');
-                        webrtc1.addRemote('vid2' + numStreams);
+                        numStreams2++;
+                        Y.one('#streams').append('<video id="vid2' + numStreams2 + '" width="400px" autoplay></video>');
+                        webrtc2.addRemote('vid2' + numStreams2);
                     });
 
                     webrtc2.startStream('both', function(id) {
-                        thisTest.resume(function () {
-                            Assert.isTrue(true);
-                        });
                     });
-
-                    thisTest.wait();
-                });
             });
 
             this.wait();
