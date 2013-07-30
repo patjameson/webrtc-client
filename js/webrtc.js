@@ -70,7 +70,7 @@ WebRTC.prototype = {
      * This is set to whatever function is passed through the onConnection method. It is
      * called when a new connection has been established.
      */
-    _newConnectionCallback: null,
+    _newConnectionCallback: function(){},
 
     /**
      * If a download has started, _downloadStatus will be the number of chunks that
@@ -126,7 +126,8 @@ WebRTC.prototype = {
      * @param dc {Array} array of DataChannels to send the message to.
      */
     send: function (message, dcs) {
-        dcs = dcs || _dcs;
+        dcs = dcs || this._dcs;
+        console.log('sending');
         var i;
         for (i = 0;i < dcs.length;i++) {
             if (dcs[i] !== undefined) {
@@ -155,10 +156,10 @@ WebRTC.prototype = {
                 j = 0,
                 i;
 
-            thisWebRTC.sendChunk('start' + numChunks + ',' + filename);
+            thisWebRTC.send('start' + numChunks + ',' + filename, thisWebRTC._file_dcs);
             for (i = 0;i < numChunks;i++) {
                 setTimeout(function() {
-                    thisWebRTC.send(e.target.result.substring(j*chunkSize, j*chunkSize + chunkSize), _file_dcs);
+                    thisWebRTC.send(e.target.result.substring(j*chunkSize, j*chunkSize + chunkSize), thisWebRTC._file_dcs);
                     j++;
                 }, (i+1)*200);
             }
@@ -269,7 +270,7 @@ WebRTC.prototype = {
      * the stream to the video element.
      */
     _startLocalStream: function (callback) {
-        thisWebRTC = this;
+        var thisWebRTC = this;
         getUserMedia({audio: true, video: true}, function (stream) {
             thisWebRTC._localStream = stream;
 
@@ -287,9 +288,8 @@ WebRTC.prototype = {
      * release cycles. It is currently in canary as a flag.
      */
     _startDataChannel: function (id) {
-        thisWebRTC = this;
-
-        this._dcs[id] = this._pcs[id].createDataChannel('data', {'reliable': false});
+        var thisWebRTC = this;
+        
         this._file_dcs[id] = this._pcs[id].createDataChannel('file', {'reliable': false});
 
         if (this._dcs[0] !== undefined && this._dcs[0].onmessage !== undefined) {
@@ -316,15 +316,9 @@ WebRTC.prototype = {
                     }
                 }
             };
-        } else {
-            this._file_dcs[id].onmessage = function(message) {
-                var splitComma = message.data.indexOf(","),
-                    filename = message.data.substring(0, splitComma),
-                    filedata = message.data.substring(splitComma+1);
-                uriContent = "data:application/octet-stream; filename=" + filename + "," + encodeURIComponent(filedata);
-                location.href = uriContent;
-            };
         }
+
+        this._dcs[id] = this._pcs[id].createDataChannel('data', {'reliable': false});
 
         this._dcs[id].onopen = function () {
             _isDataChannelOpen = true;
@@ -336,74 +330,112 @@ WebRTC.prototype = {
     },
 
     /**
-     * Creates a connection between two peer connections, starts a datachannel, adds the localStream,
-     * and starts the handshake.
+     * Creates a connection between two peer connections, starts a datachannel, and adds the localStream.
      *
-     * @param id2 {String} the id of the remote peer connection
      * @param id {String} the id of the local peer connection
      */
-    _createConn: function(id2, id) {
+    _createConn: function(id) {
         var configuration = {'iceServers': [this.DEFAULT_STUN_SERVER]},
             connection = {'optional': [{'RtpDataChannels': true }]};
         this._pcs[id] = new RTCPeerConnection(configuration, connection);
         this._startDataChannel(id);
 
-        this._pcs[id].addStream(this._localStream);
-
-        this._updateDescription(this._pcs[id], id2, id);
+        //this will only exist if the user chooses 'media' or 'both'
+        if (this._localStream) {
+            this._pcs[id].addStream(this._localStream);
+        }
     },
 
     /**
-     * Handles the web socket connection between the server.
+     * Handles the handshaking with the other client through a server, communicating with the server
+     * via WebSockets.
      *
-     * @param callback {function} the function that will be called when this instance has joined
-     * the room
+     * WebRTC Ordering:
+     * The ordering of the WebRTC handshake is extremely important for a connection to be successful. 
+     * The following is the order that this script uses to make a connection. We will use client1 and 
+     * client2 as the names of two web browsers trying to connect to each other.
+     * 
+     * 1. client1 creates an RTCPeerConnection object
+     * 2. client1 adds its video stream using RTCPeerConnection.addStream() [if desired]
+     * 3. client1 calls RTCPeerConnection.createOffer(), which gives client1 a description
+     *    of its media capabilities (SDP)
+     * 4. client1 sends the description to client2 through any means (this script is using
+     *    WebSockets currently)
+     * 5. client2 creates an RTCPeerConnection object
+     * 6. client2 adds its video stream using RTCPeerConnection.addStream() [if desired]
+     * 7. client2 sets client1's description as its remote description using
+     *    RTCPeerConnection.setRemoteDescription()
+     * 8. As soon as the remote description is set, ICECandidates start being generated by client2.
+     *    These ICECandidates are sent over to client1 similarly to how the descriptions were sent.
+     * 9. When client1 recieves the ICECandidates, it calls RTCPeerConnection.addIceCandidate() for
+     *    each candidate.
+     * 10. client2 calls RTCPeerConnection.createAnswer(), which gives client2 its own description
+     * 11. client2 sends the description to client1 through any means (this script is using
+     *    WebSockets currently)
+     * 12. client1 sets client2's description as its remote description using
+     *    RTCPeerConnection.setRemoteDescription()
+     * 13. As soon as the remote description is set, ICECandidates start being generated by client1.
+     *    These ICECandidates are sent over to client2 similarly to how the descriptions were sent.
+     * 14. When client2 recieves the ICECandidates, it calls RTCPeerConnection.addIceCandidate() for
+     *    each candidate.
+     * 15. Connection complete!
      *
-     * @param pc {RTCPeerConnection} the RTCPeerConnection to be used when making the connection
+     * Connection Chaining:
+     * If you are joining a room with more than one other client, you can not reliably call createOffer
+     * to every client at the same time. The connections sometimes fail. To solve this, _makeConnection
+     * waits for the onaddstream method to fire before starting to connect to the next client.
+     *
+     * @param callback {function} will be called after successfully joining the room
      */
     _makeConnection: function (callback) {
         var thisWebRTC = this;
 
+        //the server calls this to signify that it knows what room this client is in.
         this._socket.on('joined', function (data) {
             client_id = data.client_id;
             id = data.id;
 
+            //this is where the connection 'chaining' starts.
             if (client_id !== 0) {
-                thisWebRTC._createConn(client_id, 0);
+                thisWebRTC._createConn(0);
+                thisWebRTC._updateDescription(thisWebRTC._pcs[0], client_id, 0);
             }
 
             callback(id);
         });
 
         this._socket.on('add_desc', function (data) {
-            client_id = data.from_client_id;
-            
-            id = data.id;
+            var client_id = data.from_client_id,
+                id = data.id;
 
             console.log(data.client_id + " <------ " + client_id);
 
             var owner = false;
 
             if (thisWebRTC._pcs[client_id] === undefined) {
-                var configuration = {'iceServers': [thisWebRTC.DEFAULT_STUN_SERVER]},
-                    connection = {'optional': [{'RtpDataChannels': true }]};
-
-                thisWebRTC._pcs[client_id] = new RTCPeerConnection(configuration, connection);
-                thisWebRTC._startDataChannel(client_id);
+                thisWebRTC._createConn(client_id);
                 owner = true;
-
-                if (thisWebRTC._localStream) {
-                    thisWebRTC._pcs[client_id].addStream(thisWebRTC._localStream);
-                }
             }
 
+            //called when we recieve the stream from the other client
             thisWebRTC._pcs[client_id].onaddstream = function (event) {
+                thisWebRTC._newConnectionCallback();
+
                 thisWebRTC._remoteStreams[thisWebRTC._remoteStreams.length] = event.stream;
+
                 attachMediaStream(thisWebRTC._remoteStreamElements[thisWebRTC._remoteStreamElements.length-1],
                     thisWebRTC._remoteStreams[thisWebRTC._remoteStreams.length-1]);
+
                 thisWebRTC._isStreaming = true;
+
+                //move on to the connecting to the next client if there are more clients.
+                if (data.client_id > client_id+1) {
+                    thisWebRTC._createConn(client_id+1);
+                    thisWebRTC._updateDescription(thisWebRTC._pcs[client_id+1], data.client_id, client_id+1);
+                }
             };
 
+            //called when we recieve an ice candidate from the other client
             thisWebRTC._pcs[client_id].onicecandidate = function (event) {
                 if (event.candidate) {
                     thisWebRTC._socket.emit('cand', {'client_id': client_id, 'from_client_id': data.client_id, 'cand': event.candidate, 'id': id});
@@ -412,25 +444,18 @@ WebRTC.prototype = {
 
             thisWebRTC._pcs[client_id].setRemoteDescription(new RTCSessionDescription(data.desc));
 
-            _streaming = true;
-
             if (owner) {
                 thisWebRTC._pcs[client_id].createAnswer(function (desc) {
                     thisWebRTC._pcs[client_id].setLocalDescription(desc);
 
                     console.log(data.client_id + " ------> " + data.from_client_id);
-
                     thisWebRTC._socket.emit('desc', {'client_id': data.from_client_id, 'from_client_id': data.client_id, 'desc': desc, 'id': id});
                 });
             }
 
-            thisWebRTC._newConnectionCallback();
 
-            if (!owner) {
-                if (data.client_id > client_id+1) {
-                    thisWebRTC._createConn(data.client_id, client_id+1);
-                }
-            }
+
+            
         });
 
         this._socket.on('add_cand', function (data) {
@@ -444,6 +469,7 @@ WebRTC.prototype = {
             }
         });
 
+        //tell the server what room to join.
         this._socket.emit('join', {'id': this._roomId});
     },
 
@@ -454,7 +480,7 @@ WebRTC.prototype = {
      *
      */
     _updateDescription: function (pc, client_id2, _client_id) {
-        thisWebRTC = this;
+        var thisWebRTC = this;
         pc.createOffer(function (desc) {
             pc.setLocalDescription(desc);
             console.log(client_id2 + " ------> " + _client_id);
@@ -462,6 +488,9 @@ WebRTC.prototype = {
         }, null);
     },
 
+    /**
+     * Sets the function to be called every time that a connection is established.
+     */
     onConnection: function (callback) {
         this._newConnectionCallback = callback;
     }
