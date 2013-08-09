@@ -11,11 +11,10 @@ YUI.add('webrtc-tests', function(Y) {
         },
 
         "WebRTC should be able to start and get the video stream": function () {
-            var webrtc1 = new Y.WebRTC();
+            var webrtc1 = new Y.WebRTC(),
+                thisTest = this;
 
             webrtc1.setLocal('vid11');
-
-            var thisTest = this;
 
             webrtc1.startStream('both', function(id) {
                 thisTest.resume(function () {
@@ -26,16 +25,14 @@ YUI.add('webrtc-tests', function(Y) {
             this.wait();
         },
 
-        "WebRTC should complete the handshake": function () {
-            var webrtc1 = new Y.WebRTC();
-            var webrtc2 = new Y.WebRTC();
+/*        "WebRTC should complete the handshake": function () {
+            var webrtc1 = new Y.WebRTC(),
+                webrtc2 = new Y.WebRTC(),
+                thisTest = this,
+                numStreams1 = 1;
 
             webrtc1.setLocal('vid11');
-
-            var thisTest = this;
-
-            var numStreams1 = 1;
-
+            
             webrtc1.onConnection(function () {
                 thisTest.resume(function () {
                     numStreams1++;
@@ -70,6 +67,62 @@ YUI.add('webrtc-tests', function(Y) {
 
             this.wait();
         }
+*/
+        "send": function () {
+            //create some peerConnections with DataChannels
+            var webrtc1 = new WebRTC();
+             
+        },
+        "sendFile": function () {
+
+        },
+        "setLocal": function () {
+
+        },
+        "addRemote": function () {
+
+        },
+        "pause": function () {
+
+        },
+        "resume": function () {
+
+        },
+        "isStreaming": function () {
+
+        },
+        "mute/unmute": function () {
+
+        },
+        "getId/setId": function () {
+
+        },
+        "setIceServers": function () {
+
+        },
+        "_getLocalStream": function () {
+
+        },
+        "_getRemoteStreams": function () {
+
+        },
+        "_startLocalStream": function () {
+
+        },
+        "_startDataChannel": function () {
+
+        },
+        "_createConn": function () {
+
+        },
+        "_makeConnection": function () {
+
+        },
+        "_updateDescription": function () {
+
+        }
     }));
+
+    'WebR
     Y.Test.Runner.add(suite);
 }, '@VERSION@' ,{requires:['webrtc', 'test']});

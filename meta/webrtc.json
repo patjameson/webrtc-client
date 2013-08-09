@@ -2,7 +2,11 @@
     "webrtc": {
         "requires": [
             "node",
-            "socket_io"
+            "socket_io",
+            "event-custom",
+            "base-build",
+            "base",
+            "node-event-simulate"
         ]
     }
 }

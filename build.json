@@ -3,6 +3,7 @@
     "builds": {
         "webrtc": {
             "jsfiles": [
+                "js/adapter.js",
                 "js/webrtc.js"
             ]
         },

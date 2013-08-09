@@ -2,9 +2,13 @@
  * WebRTC module for YUI
  *
  */
-function WebRTC() {}
+function WebRTC(config) {
+    WebRTC.superclass.constructor.apply(this, arguments);
+}
 
-WebRTC.prototype = {
+WebRTC.NAME = 'webrtc';
+
+Y.extend(WebRTC, Y.Base, {
     /**
      * This is the server that finds the external ip address when the client is behind a NAT
      */
@@ -14,6 +18,13 @@ WebRTC.prototype = {
      * The socket.io connection to the server that is used for handshaking between two clients.
      */
     _socket: io.connect('/'),
+
+    /**
+     * The type of connection this will be.
+     *
+     * @param type {String} Either media, data, or both.
+     */
+    _type: '',
 
     /**
      * The video DOM element that displays the local video stream.
@@ -70,7 +81,7 @@ WebRTC.prototype = {
      * This is set to whatever function is passed through the onConnection method. It is
      * called when a new connection has been established.
      */
-    _newConnectionCallback: function(){},
+    _newConnectionCallback: function () {},
 
     /**
      * If a download has started, _downloadStatus will be the number of chunks that
@@ -92,11 +103,13 @@ WebRTC.prototype = {
     /**
      * Decides whether it should start the camera or not and then starts the connection.
      *
-     * @param {String} type can be 'both', 'media', or 'data'. Defaults to 'both'.
-     * @param {Function} callback Called after user has joined the room.
+     * @param type {String} Can be 'both', 'media', or 'data'. Defaults to 'both'.
+     * @param callback {Function} Called after user has joined the room.
      */
     startStream: function (type, callback) {
         var thisWebRTC = this;
+
+        this._type = type;
 
         if (type === 'both' || type === 'media' || typeof type === undefined) {
             thisWebRTC._startLocalStream(function () {
@@ -108,32 +121,18 @@ WebRTC.prototype = {
     },
 
     /**
-     * Sets the callback for the datachannels.
-     *
-     * @param {Function} callback The function to called when a message is broadcasted to the channel.
-     */
-    onMessage: function (callback) {
-        var i;
-        for (i = 0;i < this._dcs.length;i++) {
-            this._dcs[i].onmessage = callback;
-        }
-    },
-
-    /**
      * Broadcasts a message to the room.
      *
      * @param message {String} The message to be broadcasted.
-     * @param dc {Array} array of DataChannels to send the message to.
+     * @param dcs {Array} array of DataChannels to send the message to.
      */
     send: function (message, dcs) {
         dcs = dcs || this._dcs;
-        console.log('sending');
         var i;
         for (i = 0;i < dcs.length;i++) {
+            console.log(message);
             if (dcs[i] !== undefined) {
                 dcs[i].send(message);
-            } else {
-                this._disconnectedMessages.push(message);
             }
         }
     },
@@ -141,7 +140,7 @@ WebRTC.prototype = {
     /**
      * Broadcasts a file download to the room given a file input element
      *
-     * @param {String} id The id of the file input element.
+     * @param id {String} The id of the file input element.
      */
     sendFile: function (id) {
         var thisWebRTC = this,
@@ -171,7 +170,7 @@ WebRTC.prototype = {
     /**
      * Sets the video element that will display the local video stream.
      *
-     * @param {String} id The id of the video element.
+     * @param id {String} The id of the video element.
      */
     setLocal: function (id) {
         this._localStreamElement = document.getElementById(id);
@@ -182,7 +181,7 @@ WebRTC.prototype = {
      * will be displayed coresponds to the order at which they were added with
      * addRemote.
      *
-     * @param {String} id The id of the video element.
+     * @param id {String} The id of the video element.
      */
     addRemote: function (id) {
         this._remoteStreamElements.push(document.getElementById(id));
@@ -271,12 +270,14 @@ WebRTC.prototype = {
      */
     _startLocalStream: function (callback) {
         var thisWebRTC = this;
-        getUserMedia({audio: true, video: true}, function (stream) {
+        getUserMedia({audio: false, video: true}, function (stream) {
             thisWebRTC._localStream = stream;
 
             attachMediaStream(thisWebRTC._localStreamElement, thisWebRTC._localStream);
 
             callback();
+        }, function(error) {
+            console.log('Error getting media device');
         });
     },
 
@@ -292,41 +293,42 @@ WebRTC.prototype = {
         
         this._file_dcs[id] = this._pcs[id].createDataChannel('file', {'reliable': false});
 
-        if (this._dcs[0] !== undefined && this._dcs[0].onmessage !== undefined) {
-            this._file_dcs[id].onmessage = function(message) {
-                if (thisWebRTC._downloadStatus > 0) {
-                    thisWebRTC._download += message.data;
+        this._file_dcs[id].onmessage = function(message) {
+            console.log('test');
+            console.log(message);
+            if (thisWebRTC._downloadStatus > 0) {
+                thisWebRTC._download += message.data;
 
-                    thisWebRTC._downloadStatus--;
+                thisWebRTC._downloadStatus--;
 
-                    if (thisWebRTC._downloadStatus === 0) {
-                        uriContent = "data:application/octet-stream," + encodeURIComponent(this._download);
-                        
-                        Y.one('body').append('<a style="position:absolute;display:none" id="webrtc-file-download" href="' +
-                            uriContent + '" download="' + this._downloadName + '"></a>');
-                        Y.one('#webrtc-file-download').simulate('click');
-                        
-                        thisWebRTC._download = '';
-                    }
-                } else {
-                    if (message.data.substring(0, 5) === 'start') {
-                        var splitComma = message.data.indexOf(',');
-                        thisWebRTC._downloadStatus = parseInt(message.data.substring(5, splitComma), 10);
-                        thisWebRTC._downloadName = message.data.substring(splitComma+1);
-                    }
+                if (thisWebRTC._downloadStatus === 0) {
+                    //TODO XSS (download name and content) Y.escape
+                    uriContent = "data:application/octet-stream," + encodeURIComponent(thisWebRTC._download);
+                    
+                    Y.one('body').append('<a style="position:absolute;display:none" id="webrtc-file-download" href="' +
+                        uriContent + '" download="' + thisWebRTC._downloadName + '"></a>');
+                    Y.one('#webrtc-file-download').simulate('click');
+                    Y.one('#webrtc-file-download').remove();
+                    
+                    thisWebRTC._download = '';
                 }
-            };
-        }
-
-        this._dcs[id] = this._pcs[id].createDataChannel('data', {'reliable': false});
-
-        this._dcs[id].onopen = function () {
-            _isDataChannelOpen = true;
-            var i;
-            for (i = 0;i < thisWebRTC._disconnectedMessages.length;i++) {
-                thisWebRTC._dcs[id].send(thisWebRTC._disconnectedMessages[i], _dcs);
+            } else {
+                if (message.data.substring(0, 5) === 'start') {
+                    var splitComma = message.data.indexOf(',');
+                    thisWebRTC._downloadStatus = parseInt(message.data.substring(5, splitComma), 10);
+                    thisWebRTC._downloadName = message.data.substring(splitComma+1);
+                }
             }
         };
+
+        this._dcs[id] = this._pcs[id].createDataChannel('data', {'reliable': false});
+        
+        this._dcs[id].onmessage = function (message) {
+            console.log('here');
+            thisWebRTC.fire('message', {
+                message: message.data
+            });
+        }
     },
 
     /**
@@ -336,9 +338,18 @@ WebRTC.prototype = {
      */
     _createConn: function(id) {
         var configuration = {'iceServers': [this.DEFAULT_STUN_SERVER]},
-            connection = {'optional': [{'RtpDataChannels': true }]};
+            connection = null;
+
+        connection = {'optional': [{'RtpDataChannels': true}], 'mandatory': {
+            'OfferToReceiveAudio': true,
+            'OfferToReceiveVideo': true,
+            'MozDontOfferDataChannel': true
+        }};
+
         this._pcs[id] = new RTCPeerConnection(configuration, connection);
-        this._startDataChannel(id);
+        if (this._type !== 'media') {
+            this._startDataChannel(id);
+        }
 
         //this will only exist if the user chooses 'media' or 'both'
         if (this._localStream) {
@@ -406,11 +417,10 @@ WebRTC.prototype = {
 
         this._socket.on('add_desc', function (data) {
             var client_id = data.from_client_id,
-                id = data.id;
+                id = data.id,
+                owner = false;
 
             console.log(data.client_id + " <------ " + client_id);
-
-            var owner = false;
 
             if (thisWebRTC._pcs[client_id] === undefined) {
                 thisWebRTC._createConn(client_id);
@@ -419,26 +429,30 @@ WebRTC.prototype = {
 
             //called when we recieve the stream from the other client
             thisWebRTC._pcs[client_id].onaddstream = function (event) {
-                thisWebRTC._newConnectionCallback();
+                thisWebRTC.fire('newConnection');
 
                 thisWebRTC._remoteStreams[thisWebRTC._remoteStreams.length] = event.stream;
 
-                attachMediaStream(thisWebRTC._remoteStreamElements[thisWebRTC._remoteStreamElements.length-1],
-                    thisWebRTC._remoteStreams[thisWebRTC._remoteStreams.length-1]);
+                attachMediaStream(thisWebRTC._remoteStreamElements[thisWebRTC._remoteStreamElements.length-1], event.stream);
 
                 thisWebRTC._isStreaming = true;
 
                 //move on to the connecting to the next client if there are more clients.
-                if (data.client_id > client_id+1) {
-                    thisWebRTC._createConn(client_id+1);
-                    thisWebRTC._updateDescription(thisWebRTC._pcs[client_id+1], data.client_id, client_id+1);
+                if (data.client_id > client_id + 1) {
+                    thisWebRTC._createConn(client_id + 1);
+                    thisWebRTC._updateDescription(thisWebRTC._pcs[client_id + 1], data.client_id, client_id + 1);
                 }
             };
 
             //called when we recieve an ice candidate from the other client
             thisWebRTC._pcs[client_id].onicecandidate = function (event) {
                 if (event.candidate) {
-                    thisWebRTC._socket.emit('cand', {'client_id': client_id, 'from_client_id': data.client_id, 'cand': event.candidate, 'id': id});
+                    thisWebRTC._socket.emit('cand', {
+                        'client_id': client_id,
+                        'from_client_id': data.client_id,
+                        'cand': event.candidate,
+                        'id': id
+                    });
                 }
             };
 
@@ -449,13 +463,14 @@ WebRTC.prototype = {
                     thisWebRTC._pcs[client_id].setLocalDescription(desc);
 
                     console.log(data.client_id + " ------> " + data.from_client_id);
-                    thisWebRTC._socket.emit('desc', {'client_id': data.from_client_id, 'from_client_id': data.client_id, 'desc': desc, 'id': id});
+                    thisWebRTC._socket.emit('desc', {
+                        'client_id': data.from_client_id,
+                        'from_client_id': data.client_id,
+                        'desc': desc,
+                        'id': id
+                    });
                 });
             }
-
-
-
-            
         });
 
         this._socket.on('add_cand', function (data) {
@@ -470,7 +485,9 @@ WebRTC.prototype = {
         });
 
         //tell the server what room to join.
-        this._socket.emit('join', {'id': this._roomId});
+        this._socket.emit('join', {
+            'id': this._roomId
+        });
     },
 
     /**
@@ -484,16 +501,14 @@ WebRTC.prototype = {
         pc.createOffer(function (desc) {
             pc.setLocalDescription(desc);
             console.log(client_id2 + " ------> " + _client_id);
-            thisWebRTC._socket.emit('desc', {'client_id': _client_id, 'from_client_id': client_id2, 'desc': desc, 'id': id});
+            thisWebRTC._socket.emit('desc', {
+                'client_id': _client_id,
+                'from_client_id': client_id2,
+                'desc': desc,
+                'id': id
+            });
         }, null);
     },
-
-    /**
-     * Sets the function to be called every time that a connection is established.
-     */
-    onConnection: function (callback) {
-        this._newConnectionCallback = callback;
-    }
-};
+});
 
 Y.WebRTC = WebRTC;
